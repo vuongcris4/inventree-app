@@ -37,10 +37,9 @@ jobs:
           distribution: temurin
           java-version: '11'
 
-      - name: Select Xcode
-        uses: apple-actions/setup-xcode@v2
-        with:
-          xcode-version: '16' # hoặc '15.4' tuỳ runner image
+      - name: Select Xcode version
+        run: sudo xcode-select -s "/Applications/Xcode_16.0.app/Contents/Developer" || sudo xcode-select -p
+
 
       # Đọc .fvmrc để xuất FLUTTER_VERSION / FLUTTER_CHANNEL
       - name: Read FVM config
