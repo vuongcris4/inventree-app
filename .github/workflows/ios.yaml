@@ -1,56 +1,127 @@
-# Build iOS version of the app
-
-name: iOS
+name: iOS CI (Flutter, FVM, no-codesign)
 
 on:
+  workflow_dispatch:
   push:
-    branches:
-      - master
-  
+    branches: [ master, main ]
+    paths:
+      - ".github/workflows/ios.yaml"
+      - "pubspec.yaml"
+      - "ios/**"
+      - "lib/**"
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-
   build:
-    runs-on: macos-latest
-  
+    name: build
+    runs-on: macos-15 # macOS 15 arm64
+
+    env:
+      CI: true
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-      with:
-        submodules: recursive
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+            submodules: recursive
+            fetch-depth: 1
 
-    - name: Setup Java
-      uses: actions/setup-java@v3
-      with:
-        distribution: 'temurin'
-        java-version: '11'
+      - name: Setup Java (for some tooling)
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: '11'
 
-    - name: Setup FVM
-      id: fvm-config-action
-      uses: kuhnroyal/flutter-fvm-config-action@v2
+      - name: Select Xcode
+        uses: apple-actions/setup-xcode@v2
+        with:
+          xcode-version: '16' # hoặc '15.4' tuỳ runner image
 
-    - name: Setup Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        flutter-version: ${{ steps.fvm-config-action.outputs.FLUTTER_VERSION }}
-        channel: ${{ steps.fvm-config-action.outputs.FLUTTER_CHANNEL }}
-        cache: true
-        cache-key: "flutter-:os:-:channel:-:version:-:arch:-:hash:"
-        cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
-        pub-cache-key: "flutter-pub:os:-:channel:-:version:-:arch:-:hash:"
-        pub-cache-path: "${{ runner.tool_cache }}/flutter/:channel:-:version:-:arch:"
+      # Đọc .fvmrc để xuất FLUTTER_VERSION / FLUTTER_CHANNEL
+      - name: Read FVM config
+        uses: kuhnroyal/flutter-fvm-config-action@v2
+        with:
+          setup: false
+          cache: true
 
-    - name: Collect Translation Files
-      run: |
-        cd lib/l10n
-        python3 collect_translations.py
+      - name: Setup Flutter SDK (from .fvmrc)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          architecture: arm64
+          cache: true
 
-    - name: Build for iOS
-      run: |
-        dart pub global activate fvm
-        fvm install
-        fvm flutter pub get
-        cd ios
-        pod repo update
-        pod install
-        cd ..
-        fvm flutter build ios --release --no-codesign --no-tree-shake-icons
+      - name: Flutter doctor
+        run: |
+          flutter --version
+          dart --version
+          flutter doctor -v
+
+      # BẮT BUỘC: precache iOS để tránh lỗi Flutter.xcframework missing trong post-install hook của CocoaPods
+      - name: Flutter precache iOS
+        run: |
+          flutter precache --ios
+          flutter config --no-analytics
+
+      # (Tùy dự án của bạn) gom bản dịch như log bạn đang dùng
+      - name: Collect translations
+        run: |
+          cd lib/l10n
+          python3 collect_translations.py
+        shell: bash
+
+      - name: Install FVM & resolve deps
+        run: |
+          dart pub global activate fvm
+          fvm install
+          fvm flutter pub get
+
+      # Cache CocoaPods
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/Pods
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods
+          key: ${{ runner.os }}-pods-${{ hashFiles('ios/Podfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pods-
+
+      - name: Pod install
+        working-directory: ios
+        run: |
+          pod repo update
+          pod install
+
+      # Build ipa KHÔNG ký (khuyến nghị dùng lệnh ipa thay vì ios --no-codesign)
+      - name: Build iOS (ipa, no codesign)
+        run: |
+          fvm flutter build ipa --release --no-codesign --no-tree-shake-icons
+
+      # Upload artifacts
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: inventree-app-ipa
+          path: |
+            build/ios/ipa/*.ipa
+            build/ios/ipa/*.dSYM.zip
+            build/ios/ipa/*.xcarchive
+
+      # Tuỳ chọn: upload báo cáo, logs build để debug
+      - name: Upload build logs (optional)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-logs
+          path: |
+            **/flutter_*.log
+            ios/Pods/Manifest.lock
+            ios/Podfile.lock
