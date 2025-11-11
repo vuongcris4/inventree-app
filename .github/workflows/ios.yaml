@@ -17,7 +17,7 @@ concurrency:
 jobs:
   build:
     name: build
-    # SỬA LỖI: Dùng runner macos-14 ổn định
+    # Chạy trên macos-14 ổn định
     runs-on: macos-14 
 
     env:
@@ -38,7 +38,7 @@ jobs:
           distribution: temurin
           java-version: '11'
 
-      # SỬA LỖI: Dùng Xcode 15.4 ổn định (đi kèm macos-14)
+      # Dùng Xcode 15.4 (đi kèm macos-14)
       - name: Select Xcode version
         run: sudo xcode-select -s "/Applications/Xcode_15.4.app/Contents/Developer" || sudo xcode-select -p
 
@@ -100,6 +100,14 @@ jobs:
       - name: Build iOS (ipa, no codesign)
         run: |
           fvm flutter build ipa --release --no-codesign --no-tree-shake-icons
+
+      # --- BƯỚC DEBUG MỚI ---
+      # Kiểm tra xem tệp .ipa có được tạo ra hay không
+      - name: Check build output directory
+        run: |
+          echo "Listing contents of build/ios/ipa..."
+          ls -lR build/ios/ipa || echo "Directory build/ios/ipa not found."
+      # --- KẾT THÚC BƯỚC DEBUG ---
 
       # Upload artifacts
       - name: Upload IPA
