@@ -1,52 +1,40 @@
-name: iOS CI (Flutter, FVM, no-codesign)
+name: iOS IPA (unsigned)
 
 on:
   workflow_dispatch:
   push:
-    branches: [ master, main ]
-    paths:
-      - ".github/workflows/ios.yaml"
-      - "pubspec.yaml"
-      - "ios/**"
-      - "lib/**"
-
-concurrency:
-  group: ios-${{ github.ref }}
-  cancel-in-progress: true
+    branches: [ master ]
 
 jobs:
   build:
     name: build
-    runs-on: macos-14 
+    runs-on: macos-14
 
     env:
-      CI: true
       LANG: en_US.UTF-8
       LC_ALL: en_US.UTF-8
 
     steps:
+      # 1) Checkout
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Setup Java (for some tooling)
-        uses: actions/setup-java@v3
-        with:
-          distribution: temurin
-          java-version: '11'
-
-      - name: Select Xcode version
+      # 2) Xcode 15.4 (khớp với runner)
+      - name: Select Xcode 15.4
         run: sudo xcode-select -s "/Applications/Xcode_15.4.app/Contents/Developer" || sudo xcode-select -p
 
-      - name: Read FVM config
+      # 3) Đọc .fvmrc để lấy version/channel Flutter
+      - name: Read FVM config (.fvmrc)
         uses: kuhnroyal/flutter-fvm-config-action@v2
         with:
           setup: false
           cache: true
 
-      - name: Setup Flutter SDK (from .fvmrc)
+      # 4) Cài Flutter đúng version từ .fvmrc
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -54,26 +42,36 @@ jobs:
           architecture: arm64
           cache: true
 
+      # 5) (Tùy dự án) Thu gom bản dịch nếu bạn có script này
+      - name: Collect translations (optional)
+        if: ${{ hashFiles('lib/l10n/collect_translations.py') != '' }}
+        run: |
+          cd lib/l10n
+          python3 collect_translations.py
+
+      # 6) Cache pub
+      - name: Cache Pub
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: flutter-pub-${{ runner.os }}-${{ env.FLUTTER_CHANNEL }}-${{ env.FLUTTER_VERSION }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            flutter-pub-${{ runner.os }}-${{ env.FLUTTER_CHANNEL }}-${{ env.FLUTTER_VERSION }}-
+
+      # 7) Flutter doctor (tham khảo)
       - name: Flutter doctor
         run: |
           flutter --version
           dart --version
           flutter doctor -v
 
-      - name: Collect translations
+      # 8) Precache iOS và pub get
+      - name: Precache iOS & Pub get
         run: |
-          cd lib/l10n
-          python3 collect_translations.py
-        shell: bash
+          flutter precache --ios
+          flutter pub get
 
-      - name: Install FVM, precache & resolve deps
-        run: |
-          dart pub global activate fvm
-          fvm install
-          fvm flutter precache --ios
-          fvm flutter config --no-analytics
-          fvm flutter pub get
-
+      # 9) Cache CocoaPods
       - name: Cache CocoaPods
         uses: actions/cache@v4
         with:
@@ -81,42 +79,43 @@ jobs:
             ios/Pods
             ~/Library/Caches/CocoaPods
             ~/.cocoapods
-          key: ${{ runner.os }}-pods-${{ hashFiles('ios/Podfile.lock') }}
+          key: macOS-pods-${{ hashFiles('ios/Podfile.lock') }}
           restore-keys: |
-            ${{ runner.os }}-pods-
+            macOS-pods-
 
-      - name: Pod install
+      # 10) Pod install
+      - name: Install Pods
         working-directory: ios
         run: |
           pod repo update
           pod install
 
-      # --- SỬA LỖI ---
-      # Xóa --no-codesign và thay bằng build-arg
-      - name: Build iOS (ipa, no codesign)
+      # 11) Build unsigned IPA
+      - name: Build iOS IPA (unsigned)
         run: |
-          fvm flutter build ipa --release --no-tree-shake-icons \
-            --build-arg="CODE_SIGN_IDENTITY=" \
-            --build-arg="CODE_SIGNING_REQUIRED=NO"
+          # Làm sạch nhẹ nhàng (tùy chọn)
+          flutter clean
+          # Build phát hành không ký
+          flutter build ipa --release --no-codesign
+        # Nếu có biến môi trường / cấu hình riêng, thêm vào env: ở đây
 
-      # --- SỬA LỖI ---
-      # Quay lại đường dẫn upload .ipa gốc
-      - name: Upload IPA
+      # 12) Thu thập dSYM (nếu cần)
+      - name: Zip dSYMs (optional)
+        run: |
+          mkdir -p build/ios/ipa
+          if compgen -G "build/ios/archive/*.xcarchive/dSYMs/*.dSYM" > /dev/null; then
+            pushd build/ios/archive
+            zip -r ../ipa/dSYMs.zip ./*.xcarchive/dSYMs/*.dSYM
+            popd
+          fi
+
+      # 13) Upload artifact (.ipa + dSYMs nếu có)
+      - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: inventree-app-ipa
+          name: ios-ipa-unsigned
           path: |
             build/ios/ipa/*.ipa
-            build/ios/ipa/*.dSYM.zip
-            build/ios/archive/Runner.xcarchive
-
-      # Tuỳ chọn: upload báo cáo, logs build để debug
-      - name: Upload build logs (optional)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-build-logs
-          path: |
-            **/flutter_*.log
-            ios/Pods/Manifest.lock
-            ios/Podfile.lock
+            build/ios/ipa/dSYMs.zip
+          if-no-files-found: error
+          retention-days: 7
