@@ -91,50 +91,23 @@ jobs:
           pod repo update
           pod install
 
-      # Build .xcarchive (KHÔNG build .ipa)
-      - name: Build iOS (archive only, no codesign)
+      # --- SỬA LỖI ---
+      # Xóa --no-codesign và thay bằng build-arg
+      - name: Build iOS (ipa, no codesign)
         run: |
-          fvm flutter build ipa --release --no-codesign --no-tree-shake-icons
+          fvm flutter build ipa --release --no-tree-shake-icons \
+            --build-arg="CODE_SIGN_IDENTITY=" \
+            --build-arg="CODE_SIGNING_REQUIRED=NO"
 
-      # --- BƯỚC 1: TẠO FILE TÙY CHỌN EXPORT ---
-      - name: Create ExportOptions.plist
-        run: |
-          mkdir -p build/ios/export
-          cat > build/ios/export/ExportOptions.plist << EOL
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>ad-hoc</string>
-              <key>destination</key>
-              <string>export</string>
-              <key>signingStyle</key>
-              <string>manual</string>
-              <key>provisioningProfiles</key>
-              <dict/>
-              <key>uploadSymbols</key>
-              <true/>
-          </dict>
-          </plist>
-          EOL
-
-      # --- BƯỚC 2: XUẤT IPA TỪ ARCHIVE ---
-      - name: Export IPA from archive
-        run: |
-          xcodebuild -exportArchive \
-            -archivePath build/ios/archive/Runner.xcarchive \
-            -exportPath build/ios/export \
-            -exportOptionsPlist build/ios/export/ExportOptions.plist
-
-      # --- BƯỚC 3: UPLOAD TỪ THƯ MỤC EXPORT MỚI ---
+      # --- SỬA LỖI ---
+      # Quay lại đường dẫn upload .ipa gốc
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: inventree-app-ipa
           path: |
-            build/ios/export/*.ipa
-            build/ios/export/*.dSYM.zip
+            build/ios/ipa/*.ipa
+            build/ios/ipa/*.dSYM.zip
             build/ios/archive/Runner.xcarchive
 
       # Tuỳ chọn: upload báo cáo, logs build để debug
