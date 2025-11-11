@@ -17,7 +17,6 @@ concurrency:
 jobs:
   build:
     name: build
-    # Chạy trên macos-14 ổn định
     runs-on: macos-14 
 
     env:
@@ -38,11 +37,9 @@ jobs:
           distribution: temurin
           java-version: '11'
 
-      # Dùng Xcode 15.4 (đi kèm macos-14)
       - name: Select Xcode version
         run: sudo xcode-select -s "/Applications/Xcode_15.4.app/Contents/Developer" || sudo xcode-select -p
 
-      # Đọc .fvmrc để xuất FLUTTER_VERSION / FLUTTER_CHANNEL
       - name: Read FVM config
         uses: kuhnroyal/flutter-fvm-config-action@v2
         with:
@@ -63,7 +60,6 @@ jobs:
           dart --version
           flutter doctor -v
 
-      # (Tùy dự án của bạn) gom bản dịch
       - name: Collect translations
         run: |
           cd lib/l10n
@@ -78,7 +74,6 @@ jobs:
           fvm flutter config --no-analytics
           fvm flutter pub get
 
-      # Cache CocoaPods
       - name: Cache CocoaPods
         uses: actions/cache@v4
         with:
@@ -96,28 +91,51 @@ jobs:
           pod repo update
           pod install
 
-      # Build ipa KHÔNG ký
-      - name: Build iOS (ipa, no codesign)
+      # Build .xcarchive (KHÔNG build .ipa)
+      - name: Build iOS (archive only, no codesign)
         run: |
           fvm flutter build ipa --release --no-codesign --no-tree-shake-icons
 
-      # --- BƯỚC DEBUG MỚI ---
-      # Kiểm tra xem tệp .ipa có được tạo ra hay không
-      - name: Check build output directory
+      # --- BƯỚC 1: TẠO FILE TÙY CHỌN EXPORT ---
+      - name: Create ExportOptions.plist
         run: |
-          echo "Listing contents of build/ios/ipa..."
-          ls -lR build/ios/ipa || echo "Directory build/ios/ipa not found."
-      # --- KẾT THÚC BƯỚC DEBUG ---
+          mkdir -p build/ios/export
+          cat > build/ios/export/ExportOptions.plist << EOL
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>ad-hoc</string>
+              <key>destination</key>
+              <string>export</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>provisioningProfiles</key>
+              <dict/>
+              <key>uploadSymbols</key>
+              <true/>
+          </dict>
+          </plist>
+          EOL
 
-      # Upload artifacts
+      # --- BƯỚC 2: XUẤT IPA TỪ ARCHIVE ---
+      - name: Export IPA from archive
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/ios/archive/Runner.xcarchive \
+            -exportPath build/ios/export \
+            -exportOptionsPlist build/ios/export/ExportOptions.plist
+
+      # --- BƯỚC 3: UPLOAD TỪ THƯ MỤC EXPORT MỚI ---
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: inventree-app-ipa
           path: |
-            build/ios/ipa/*.ipa
-            build/ios/ipa/*.dSYM.zip
-            build/ios/ipa/*.xcarchive
+            build/ios/export/*.ipa
+            build/ios/export/*.dSYM.zip
+            build/ios/archive/Runner.xcarchive
 
       # Tuỳ chọn: upload báo cáo, logs build để debug
       - name: Upload build logs (optional)
