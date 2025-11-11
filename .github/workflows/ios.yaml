@@ -28,8 +28,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
         with:
-            submodules: recursive
-            fetch-depth: 1
+          submodules: recursive
+          fetch-depth: 1
 
       - name: Setup Java (for some tooling)
         uses: actions/setup-java@v3
@@ -39,7 +39,6 @@ jobs:
 
       - name: Select Xcode version
         run: sudo xcode-select -s "/Applications/Xcode_16.0.app/Contents/Developer" || sudo xcode-select -p
-
 
       # Đọc .fvmrc để xuất FLUTTER_VERSION / FLUTTER_CHANNEL
       - name: Read FVM config
@@ -62,23 +61,19 @@ jobs:
           dart --version
           flutter doctor -v
 
-      # BẮT BUỘC: precache iOS để tránh lỗi Flutter.xcframework missing trong post-install hook của CocoaPods
-      - name: Flutter precache iOS
-        run: |
-          flutter precache --ios
-          flutter config --no-analytics
-
-      # (Tùy dự án của bạn) gom bản dịch như log bạn đang dùng
+      # (Tùy dự án của bạn) gom bản dịch
       - name: Collect translations
         run: |
           cd lib/l10n
           python3 collect_translations.py
         shell: bash
 
-      - name: Install FVM & resolve deps
+      - name: Install FVM, precache & resolve deps
         run: |
           dart pub global activate fvm
           fvm install
+          fvm flutter precache --ios
+          fvm flutter config --no-analytics
           fvm flutter pub get
 
       # Cache CocoaPods
@@ -99,7 +94,7 @@ jobs:
           pod repo update
           pod install
 
-      # Build ipa KHÔNG ký (khuyến nghị dùng lệnh ipa thay vì ios --no-codesign)
+      # Build ipa KHÔNG ký
       - name: Build iOS (ipa, no codesign)
         run: |
           fvm flutter build ipa --release --no-codesign --no-tree-shake-icons
